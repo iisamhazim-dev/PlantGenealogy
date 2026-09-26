@@ -22,8 +22,8 @@ public sealed class GenealogyNode
     public List<GenealogyNode> Children { get; } = new();
     public double X { get; set; }
     public double Y { get; set; }
+    public int Depth { get; set; }
     public bool IsRoot => ParentId is null;
-    public Brush Fill => IsRoot ? new SolidColorBrush(Color.FromRgb(214, 180, 98)) : new SolidColorBrush(Color.FromRgb(244, 214, 120));
 }
 
 public sealed class GenealogyRepository
@@ -38,308 +38,287 @@ public sealed class GenealogyRepository
         Initialize();
     }
 
-    private SqliteConnection Open() { var c = new SqliteConnection(_connectionString); c.Open(); return c; }
+    private SqliteConnection Open()
+    {
+        var connection = new SqliteConnection(_connectionString);
+        connection.Open();
+        return connection;
+    }
 
     private void Initialize()
     {
-        using var con = Open();
-        using var cmd = con.CreateCommand();
-        cmd.CommandText = @"
-CREATE TABLE IF NOT EXISTS Persons (
+        using var connection = Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = @"
+CREATE TABLE IF NOT EXISTS Persons(
     Id INTEGER PRIMARY KEY AUTOINCREMENT,
     Name TEXT NOT NULL,
     Title TEXT NOT NULL DEFAULT '',
     Notes TEXT NOT NULL DEFAULT '',
     ParentId INTEGER NULL REFERENCES Persons(Id) ON DELETE CASCADE,
     CreatedAt TEXT NOT NULL DEFAULT (datetime('now'))
-);";
-        cmd.ExecuteNonQuery();
+);
+CREATE INDEX IF NOT EXISTS IX_Persons_ParentId ON Persons(ParentId);";
+        command.ExecuteNonQuery();
     }
 
     public List<GenealogyNode> LoadAll()
     {
-        using var con = Open();
-        using var cmd = con.CreateCommand();
-        cmd.CommandText = "SELECT Id, Name, Title, Notes, ParentId, CreatedAt FROM Persons ORDER BY Id;";
-        using var reader = cmd.ExecuteReader();
-        var list = new List<GenealogyNode>();
+        using var connection = Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT Id, Name, Title, Notes, ParentId, CreatedAt FROM Persons ORDER BY Id;";
+        using var reader = command.ExecuteReader();
+        var nodes = new List<GenealogyNode>();
         while (reader.Read())
         {
-            list.Add(new GenealogyNode
+            nodes.Add(new GenealogyNode
             {
                 Id = reader.GetInt32(0),
                 Name = reader.GetString(1),
                 Title = reader.IsDBNull(2) ? string.Empty : reader.GetString(2),
                 Notes = reader.IsDBNull(3) ? string.Empty : reader.GetString(3),
                 ParentId = reader.IsDBNull(4) ? null : reader.GetInt32(4),
-                CreatedAt = DateTime.TryParse(reader.GetString(5), out var d) ? d : DateTime.Now
+                CreatedAt = DateTime.TryParse(reader.GetString(5), out var date) ? date : DateTime.Now
             });
         }
 
-        var map = list.ToDictionary(x => x.Id);
-        foreach (var item in list)
-        {
-            if (item.ParentId is int parentId && map.TryGetValue(parentId, out var parent))
-            {
-                parent.Children.Add(item);
-            }
-        }
-        return list;
+        var byId = nodes.ToDictionary(n => n.Id);
+        foreach (var node in nodes)
+            if (node.ParentId is int parentId && byId.TryGetValue(parentId, out var parent))
+                parent.Children.Add(node);
+        return nodes;
     }
 
     public GenealogyNode? LoadRoot()
     {
-        var all = LoadAll();
-        return all.FirstOrDefault(x => x.ParentId is null) ?? null;
+        var nodes = LoadAll();
+        return nodes.FirstOrDefault(n => n.ParentId is null);
     }
 
     public int Add(string name, string title, string notes, int? parentId)
     {
-        using var con = Open();
-        using var cmd = con.CreateCommand();
-        cmd.CommandText = "INSERT INTO Persons(Name, Title, Notes, ParentId, CreatedAt) VALUES(@Name,@Title,@Notes,@ParentId,@CreatedAt); SELECT last_insert_rowid();";
-        cmd.Parameters.AddWithValue("@Name", name.Trim());
-        cmd.Parameters.AddWithValue("@Title", title.Trim());
-        cmd.Parameters.AddWithValue("@Notes", notes.Trim());
-        cmd.Parameters.AddWithValue("@ParentId", parentId.HasValue ? parentId.Value : DBNull.Value);
-        cmd.Parameters.AddWithValue("@CreatedAt", DateTime.Now.ToString("O"));
-        return Convert.ToInt32(cmd.ExecuteScalar());
+        using var connection = Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = "INSERT INTO Persons(Name,Title,Notes,ParentId,CreatedAt) VALUES(@Name,@Title,@Notes,@ParentId,@CreatedAt); SELECT last_insert_rowid();";
+        command.Parameters.AddWithValue("@Name", name.Trim());
+        command.Parameters.AddWithValue("@Title", title.Trim());
+        command.Parameters.AddWithValue("@Notes", notes.Trim());
+        command.Parameters.AddWithValue("@ParentId", parentId.HasValue ? parentId.Value : DBNull.Value);
+        command.Parameters.AddWithValue("@CreatedAt", DateTime.Now.ToString("O"));
+        return Convert.ToInt32(command.ExecuteScalar());
     }
 
     public void Update(int id, string name, string title, string notes)
     {
-        using var con = Open();
-        using var cmd = con.CreateCommand();
-        cmd.CommandText = "UPDATE Persons SET Name=@Name, Title=@Title, Notes=@Notes WHERE Id=@Id;";
-        cmd.Parameters.AddWithValue("@Id", id);
-        cmd.Parameters.AddWithValue("@Name", name.Trim());
-        cmd.Parameters.AddWithValue("@Title", title.Trim());
-        cmd.Parameters.AddWithValue("@Notes", notes.Trim());
-        cmd.ExecuteNonQuery();
+        using var connection = Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = "UPDATE Persons SET Name=@Name, Title=@Title, Notes=@Notes WHERE Id=@Id;";
+        command.Parameters.AddWithValue("@Id", id);
+        command.Parameters.AddWithValue("@Name", name.Trim());
+        command.Parameters.AddWithValue("@Title", title.Trim());
+        command.Parameters.AddWithValue("@Notes", notes.Trim());
+        command.ExecuteNonQuery();
     }
 
     public void Delete(int id)
     {
-        using var con = Open();
-        using var cmd = con.CreateCommand();
-        cmd.CommandText = "DELETE FROM Persons WHERE Id=@Id;";
-        cmd.Parameters.AddWithValue("@Id", id);
-        cmd.ExecuteNonQuery();
+        using var connection = Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = "DELETE FROM Persons WHERE Id=@Id;";
+        command.Parameters.AddWithValue("@Id", id);
+        command.ExecuteNonQuery();
     }
 
     public void SeedIfEmpty()
     {
-        using var con = Open();
-        using var cmd = con.CreateCommand();
-        cmd.CommandText = "SELECT COUNT(*) FROM Persons;";
-        var count = Convert.ToInt32(cmd.ExecuteScalar());
-        if (count > 0) return;
+        using var connection = Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT COUNT(*) FROM Persons;";
+        if (Convert.ToInt32(command.ExecuteScalar()) != 0) return;
 
-        var rootId = Add("حسين", "الجد", "جذر الشجرة", null);
-        var child1 = Add("محمد", "الأول", "فرع أول", rootId);
-        var child2 = Add("علي", "الثاني", "فرع ثاني", rootId);
-        Add("حسن", "ابن محمد", "فرع أبنائه", child1);
-        Add("سارة", "ابنة محمد", "فرع بناته", child1);
-        Add("رامي", "ابن علي", "فرع أبنائه", child2);
-        Add("مها", "ابنة علي", "فرع بناته", child2);
-        Add("سلمان", "ابن حسن", "أحفاد", null);
+        var root = Add("حسين", "الجذر", "بداية شجرة النسب", null);
+        var left = Add("محمد", "الفرع الأول", "", root);
+        var right = Add("علي", "الفرع الثاني", "", root);
+        var leftLeft = Add("حسن", "ابن محمد", "", left);
+        Add("سارة", "ابنة محمد", "", left);
+        Add("رامي", "ابن علي", "", right);
+        Add("مها", "ابنة علي", "", right);
+        Add("سلمان", "ابن حسن", "", leftLeft);
     }
 }
 
 public partial class MainWindow : Window
 {
+    private const double CanvasWidth = 2600;
+    private const double CanvasHeight = 1900;
     private readonly GenealogyRepository _repository = new();
     private GenealogyNode? _selectedNode;
 
     public MainWindow()
     {
         InitializeComponent();
-        Loaded += MainWindow_Loaded;
-    }
-
-    private void MainWindow_Loaded(object sender, RoutedEventArgs e)
-    {
-        _repository.SeedIfEmpty();
-        DrawTree();
+        Loaded += (_, _) => { _repository.SeedIfEmpty(); DrawTree(); };
     }
 
     private void DrawTree()
     {
         TreeCanvas.Children.Clear();
+        TreeCanvas.Width = CanvasWidth;
+        TreeCanvas.Height = CanvasHeight;
+        DrawBackground();
+
         var root = _repository.LoadRoot();
-        if (root is null)
+        if (root is null) return;
+
+        var nodes = Flatten(root);
+        var leaves = CountLeaves(root);
+        Layout(root, 150, CanvasWidth - 150, 0, Math.Max(1, leaves));
+
+        foreach (var node in nodes)
+            foreach (var child in node.Children)
+                DrawBranch(node, child);
+
+        foreach (var node in nodes)
         {
-            SelectedNodeText.Text = "لا يوجد";
-            return;
+            DrawDecorativeLeaves(node);
+            DrawNode(node);
         }
 
-        var all = Flatten(root);
-        var rootWidth = 2200;
-        var rootHeight = 1200;
-        TreeCanvas.Width = rootWidth;
-        TreeCanvas.Height = rootHeight;
+        DrawGround();
+    }
 
-        var minX = 200D;
-        var maxX = 2000D;
-        var minY = 80D;
-        var maxY = 1000D;
-        ComputeLayout(root, minX, maxX, minY, maxY, 0);
+    private void DrawBackground()
+    {
+        TreeCanvas.Children.Add(new Rectangle { Width = CanvasWidth, Height = CanvasHeight, Fill = new SolidColorBrush(Color.FromRgb(249, 246, 237)) });
+        for (var x = 40; x < CanvasWidth; x += 110)
+            TreeCanvas.Children.Add(new Line { X1 = x, Y1 = 0, X2 = x + 45, Y2 = CanvasHeight, Stroke = new SolidColorBrush(Color.FromArgb(20, 173, 145, 95)), StrokeThickness = 1 });
+        var title = new TextBlock { Text = "شَجَرَةُ النَّسَب", FontSize = 45, FontWeight = FontWeights.Bold, Foreground = new SolidColorBrush(Color.FromRgb(82, 53, 24)), Width = CanvasWidth, TextAlignment = TextAlignment.Center, FontFamily = new FontFamily("Traditional Arabic") };
+        Canvas.SetTop(title, 30);
+        TreeCanvas.Children.Add(title);
+        var subtitle = new TextBlock { Text = "سجل النسب التفاعلي", FontSize = 22, Foreground = new SolidColorBrush(Color.FromRgb(31, 106, 69)), Width = CanvasWidth, TextAlignment = TextAlignment.Center };
+        Canvas.SetTop(subtitle, 88);
+        TreeCanvas.Children.Add(subtitle);
+    }
 
-        var allById = all.ToDictionary(x => x.Id);
-        foreach (var node in all)
+    private void DrawGround()
+    {
+        var ground = new Path { Stroke = new SolidColorBrush(Color.FromRgb(48, 122, 67)), StrokeThickness = 11, Opacity = .8, Data = Geometry.Parse($"M 80,1780 C 600,1740 900,1810 1300,1770 C 1750,1730 2120,1800 2520,1760") };
+        TreeCanvas.Children.Add(ground);
+        for (var i = 0; i < 24; i++)
         {
-            if (node.ParentId is int parentId && allById.TryGetValue(parentId, out var parent))
-            {
-                var line = new Line
-                {
-                    X1 = parent.X,
-                    Y1 = parent.Y + 24,
-                    X2 = node.X,
-                    Y2 = node.Y - 24,
-                    Stroke = Brushes.SaddleBrown,
-                    StrokeThickness = 3,
-                    StrokeEndLineCap = PenLineCap.Round,
-                    StrokeStartLineCap = PenLineCap.Round
-                };
-                TreeCanvas.Children.Add(line);
-            }
-        }
-
-        foreach (var node in all)
-        {
-            var outer = new Ellipse
-            {
-                Width = 74,
-                Height = 74,
-                Fill = node.IsRoot ? Brushes.Goldenrod : Brushes.Gold,
-                Stroke = Brushes.DarkGreen,
-                StrokeThickness = 2.5,
-                Tag = node
-            };
-            Canvas.SetLeft(outer, node.X - 37);
-            Canvas.SetTop(outer, node.Y - 37);
-            outer.MouseLeftButtonDown += Node_Click;
-
-            var inner = new Ellipse
-            {
-                Width = 62,
-                Height = 62,
-                Fill = node.IsRoot ? Brushes.Goldenrod : new SolidColorBrush(Color.FromRgb(247, 229, 157)),
-                Stroke = Brushes.DarkGreen,
-                StrokeThickness = 1.2
-            };
-            Canvas.SetLeft(inner, node.X - 31);
-            Canvas.SetTop(inner, node.Y - 31);
-
-            var text = new TextBlock
-            {
-                Text = Truncate(node.Name, 12),
-                FontSize = 12,
-                FontWeight = FontWeights.Bold,
-                Foreground = Brushes.DarkGreen,
-                TextAlignment = TextAlignment.Center,
-                Width = 60,
-                Height = 34,
-                TextWrapping = TextWrapping.NoWrap,
-                FontFamily = new FontFamily("Arial")
-            };
-            Canvas.SetLeft(text, node.X - 30);
-            Canvas.SetTop(text, node.Y - 18);
-
-            TreeCanvas.Children.Add(outer);
-            TreeCanvas.Children.Add(inner);
-            TreeCanvas.Children.Add(text);
+            var blade = new Line { X1 = 120 + i * 100, Y1 = 1782, X2 = 105 + i * 100, Y2 = 1740 - (i % 3) * 12, Stroke = new SolidColorBrush(Color.FromRgb(40, 125, 65)), StrokeThickness = 4 };
+            TreeCanvas.Children.Add(blade);
         }
     }
 
-    private void ComputeLayout(GenealogyNode node, double left, double right, double top, double bottom, int depth)
+    private void Layout(GenealogyNode node, double left, double right, int depth, int leafCount)
     {
-        var x = (left + right) / 2.0;
-        var y = top + depth * 160;
-        node.X = x;
-        node.Y = y;
-
+        node.Depth = depth;
+        node.Y = CanvasHeight - 190 - depth * 205;
         if (node.Children.Count == 0)
         {
+            node.X = (left + right) / 2;
             return;
         }
 
-        var total = node.Children.Sum(c => c.Children.Count == 0 ? 2 : 3);
-        var step = (right - left) / Math.Max(1, total);
-        double currentLeft = left;
-
+        var total = node.Children.Sum(CountLeaves);
+        var current = left;
         foreach (var child in node.Children)
         {
-            var childWidth = child.Children.Count == 0 ? 220 : 280 + child.Children.Count * 50;
-            var childRight = currentLeft + childWidth;
-            ComputeLayout(child, currentLeft, childRight, top + 160, bottom, depth + 1);
-            currentLeft = childRight + 40;
+            var width = (right - left) * CountLeaves(child) / total;
+            Layout(child, current, current + width, depth + 1, CountLeaves(child));
+            current += width;
+        }
+        node.X = node.Children.Average(c => c.X);
+    }
+
+    private void DrawBranch(GenealogyNode parent, GenealogyNode child)
+    {
+        var bendY = (parent.Y + child.Y) / 2;
+        var path = new Path
+        {
+            Stroke = new SolidColorBrush(Color.FromRgb(91, 55, 26)),
+            StrokeThickness = parent.IsRoot ? 24 : Math.Max(7, 18 - child.Depth * 2),
+            StrokeStartLineCap = PenLineCap.Round,
+            StrokeEndLineCap = PenLineCap.Round,
+            Data = Geometry.Parse($"M {parent.X},{parent.Y} C {parent.X},{bendY} {child.X},{bendY} {child.X},{child.Y}")
+        };
+        TreeCanvas.Children.Add(path);
+
+        var twig = new Line { X1 = child.X, Y1 = child.Y + 35, X2 = child.X + (child.X >= parent.X ? 42 : -42), Y2 = child.Y + 3, Stroke = new SolidColorBrush(Color.FromRgb(105, 67, 33)), StrokeThickness = 5 };
+        TreeCanvas.Children.Add(twig);
+    }
+
+    private void DrawDecorativeLeaves(GenealogyNode node)
+    {
+        var count = Math.Min(8, 2 + node.Children.Count * 2);
+        for (var i = 0; i < count; i++)
+        {
+            var angle = -145 + i * (290.0 / Math.Max(1, count - 1));
+            var radians = angle * Math.PI / 180;
+            var distance = 48 + (i % 3) * 12;
+            var leaf = new Ellipse { Width = 34, Height = 17, Fill = new SolidColorBrush(Color.FromRgb(42, 126, 72)), Stroke = new SolidColorBrush(Color.FromRgb(24, 93, 49)), StrokeThickness = 1 };
+            Canvas.SetLeft(leaf, node.X + Math.Cos(radians) * distance - 17);
+            Canvas.SetTop(leaf, node.Y + Math.Sin(radians) * distance - 8);
+            leaf.RenderTransform = new RotateTransform(angle, 17, 8);
+            TreeCanvas.Children.Add(leaf);
         }
     }
+
+    private void DrawNode(GenealogyNode node)
+    {
+        var border = new Border { Width = node.IsRoot ? 142 : 112, Height = node.IsRoot ? 142 : 112, CornerRadius = new CornerRadius(70), Background = node.IsRoot ? new SolidColorBrush(Color.FromRgb(218, 173, 66)) : new SolidColorBrush(Color.FromRgb(249, 224, 121)), BorderBrush = new SolidColorBrush(Color.FromRgb(75, 112, 45)), BorderThickness = new Thickness(4), Tag = node, Cursor = Cursors.Hand };
+        var text = new TextBlock { Text = node.Name, FontSize = node.IsRoot ? 23 : 18, FontWeight = FontWeights.Bold, Foreground = new SolidColorBrush(Color.FromRgb(54, 74, 31)), TextAlignment = TextAlignment.Center, TextWrapping = TextWrapping.Wrap, VerticalAlignment = VerticalAlignment.Center, FontFamily = new FontFamily("Arial") };
+        border.Child = text;
+        border.MouseLeftButtonDown += Node_Click;
+        Canvas.SetLeft(border, node.X - border.Width / 2);
+        Canvas.SetTop(border, node.Y - border.Height / 2);
+        TreeCanvas.Children.Add(border);
+    }
+
+    private static int CountLeaves(GenealogyNode node) => node.Children.Count == 0 ? 1 : node.Children.Sum(CountLeaves);
 
     private static List<GenealogyNode> Flatten(GenealogyNode root)
     {
         var list = new List<GenealogyNode>();
-        void Walk(GenealogyNode node)
-        {
-            list.Add(node);
-            foreach (var child in node.Children) Walk(child);
-        }
-        Walk(root);
+        void Visit(GenealogyNode node) { list.Add(node); foreach (var child in node.Children) Visit(child); }
+        Visit(root);
         return list;
     }
 
     private void Node_Click(object sender, MouseButtonEventArgs e)
     {
-        if (sender is Ellipse ellipse && ellipse.Tag is GenealogyNode node)
+        if (sender is Border border && border.Tag is GenealogyNode node)
         {
             _selectedNode = node;
             NameTextBox.Text = node.Name;
             TitleTextBox.Text = node.Title;
             NotesTextBox.Text = node.Notes;
             SelectedNodeText.Text = node.Name;
+            e.Handled = true;
         }
     }
 
-    private static string Truncate(string value, int maxLength) => value.Length <= maxLength ? value : value.Substring(0, maxLength - 1) + "…";
-
-    private void AddRootButton_Click(object sender, RoutedEventArgs e)
-    {
-        AddPerson(null);
-    }
+    private void AddRootButton_Click(object sender, RoutedEventArgs e) => AddPerson(null);
 
     private void AddChildButton_Click(object sender, RoutedEventArgs e)
     {
-        if (_selectedNode is null)
-        {
-            MessageBox.Show("يرجى تحديد شخص أولاً.", "تنبيه", MessageBoxButton.OK, MessageBoxImage.Information);
-            return;
-        }
-
+        if (_selectedNode is null) { MessageBox.Show("حدد عقدة أولاً.", "تنبيه"); return; }
         AddPerson(_selectedNode.Id);
     }
 
     private void UpdateButton_Click(object sender, RoutedEventArgs e)
     {
-        if (_selectedNode is null)
-        {
-            MessageBox.Show("يرجى تحديد الشخص المراد تحديثه.", "تنبيه");
-            return;
-        }
+        if (_selectedNode is null) { MessageBox.Show("حدد عقدة لتحديثها.", "تنبيه"); return; }
+        if (string.IsNullOrWhiteSpace(NameTextBox.Text)) { MessageBox.Show("أدخل الاسم.", "تنبيه"); return; }
         _repository.Update(_selectedNode.Id, NameTextBox.Text, TitleTextBox.Text, NotesTextBox.Text);
         DrawTree();
     }
 
     private void DeleteButton_Click(object sender, RoutedEventArgs e)
     {
-        if (_selectedNode is null)
-        {
-            MessageBox.Show("يرجى تحديد شخص أولاً للحذف.", "تنبيه");
-            return;
-        }
-
-        var result = MessageBox.Show($"هل تريد حذف {_selectedNode.Name} وجميع فروعه؟", "تأكيد الحذف", MessageBoxButton.YesNo, MessageBoxImage.Warning);
-        if (result == MessageBoxResult.Yes)
+        if (_selectedNode is null) { MessageBox.Show("حدد عقدة لحذفها.", "تنبيه"); return; }
+        if (MessageBox.Show($"حذف «{_selectedNode.Name}» وجميع فروعه؟", "تأكيد", MessageBoxButton.YesNo, MessageBoxImage.Warning) == MessageBoxResult.Yes)
         {
             _repository.Delete(_selectedNode.Id);
             ClearForm();
@@ -347,10 +326,7 @@ public partial class MainWindow : Window
         }
     }
 
-    private void ClearButton_Click(object sender, RoutedEventArgs e)
-    {
-        ClearForm();
-    }
+    private void ClearButton_Click(object sender, RoutedEventArgs e) => ClearForm();
 
     private void ClearForm()
     {
@@ -363,12 +339,7 @@ public partial class MainWindow : Window
 
     private void AddPerson(int? parentId)
     {
-        if (string.IsNullOrWhiteSpace(NameTextBox.Text))
-        {
-            MessageBox.Show("يرجى إدخال اسم الشخص.", "تنبيه", MessageBoxButton.OK, MessageBoxImage.Warning);
-            return;
-        }
-
+        if (string.IsNullOrWhiteSpace(NameTextBox.Text)) { MessageBox.Show("أدخل الاسم أولاً.", "تنبيه"); return; }
         _repository.Add(NameTextBox.Text, TitleTextBox.Text, NotesTextBox.Text, parentId);
         ClearForm();
         DrawTree();

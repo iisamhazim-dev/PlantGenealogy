@@ -1,0 +1,14 @@
+<Application x:Class="PlantGenealogy.App"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             StartupUri="MainWindow.xaml">
+    <Application.Resources>
+        <SolidColorBrush x:Key="PageBackground" Color="#F3F0E8"/>
+        <SolidColorBrush x:Key="PanelBackground" Color="#FFFDF8"/>
+        <SolidColorBrush x:Key="Gold" Color="#D7AF5D"/>
+        <SolidColorBrush x:Key="DeepGreen" Color="#1F6A45"/>
+        <SolidColorBrush x:Key="DarkBrown" Color="#6B3E1F"/>
+        <SolidColorBrush x:Key="LeafGreen" Color="#2F8F5A"/>
+        <SolidColorBrush x:Key="LeafGreenSoft" Color="#7CCB79"/>
+    </Application.Resources>
+</Application>
